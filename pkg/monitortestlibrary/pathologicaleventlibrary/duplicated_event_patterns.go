@@ -841,6 +841,7 @@ func (ade *OverlapOtherIntervalsPathologicalEventMatcher) Allows(i monitorapi.In
 
 func newTopologyAwareHintsDisabledDuringTaintTestsPathologicalEventMatcher(finalIntervals monitorapi.Intervals) EventMatcher {
 
+	messageReasonRegex := regexp.MustCompile(`^TopologyAwareHintsDisabled$`)
 	if finalIntervals == nil || len(finalIntervals) == 0 {
 		// We were not given final intervals likely because the caller is looking for runtime
 		// checks for interesting events, and not actually evaluating which repeated pathologically yet.
@@ -848,7 +849,7 @@ func newTopologyAwareHintsDisabledDuringTaintTestsPathologicalEventMatcher(final
 		// as interesting, but not allowing them to repeat pathologically.
 		return &SimplePathologicalEventMatcher{
 			name:               "TopologyAwareHintsDisabledDuringTaintManagerTests",
-			messageReasonRegex: regexp.MustCompile(`^TopologyAwareHintsDisabled$`),
+			messageReasonRegex: messageReasonRegex,
 			neverAllow:         true,
 		}
 	}
@@ -872,6 +873,10 @@ func newTopologyAwareHintsDisabledDuringTaintTestsPathologicalEventMatcher(final
 			(eventInterval.StructuredLocator.Type == monitorapi.LocatorTypePod || eventInterval.StructuredLocator.Type == monitorapi.LocatorTypeContainer) &&
 			eventInterval.StructuredLocator.Keys[monitorapi.LocatorNamespaceKey] == "openshift-dns" &&
 			eventInterval.StructuredMessage.Annotations[monitorapi.AnnotationConstructed] == monitorapi.ConstructionOwnerPodLifecycle
+	})
+
+	topologyAwareHintsDisabledIntervals := finalIntervals.Filter(func(eventInterval monitorapi.Interval) bool {
+		return messageReasonRegex.MatchString(string(eventInterval.StructuredMessage.Reason))
 	})
 
 	// Now expand the allowed time range until the replacement dns pod gets ready
@@ -899,6 +904,14 @@ func newTopologyAwareHintsDisabledDuringTaintTestsPathologicalEventMatcher(final
 				break
 			}
 		}
+		for _, interval := range topologyAwareHintsDisabledIntervals {
+			if interval.From.After(adjustedTaintTestIntervals[i].To) {
+				// This is the first interval after the adjusted range, we will allow this since the events might have occurred
+				// during the above time range.
+				adjustedTaintTestIntervals[i].To = interval.From
+				break
+			}
+		}
 	}
 	// Log final adjusted time ranges
 	for _, testInterval := range adjustedTaintTestIntervals {
@@ -908,7 +921,7 @@ func newTopologyAwareHintsDisabledDuringTaintTestsPathologicalEventMatcher(final
 	return &OverlapOtherIntervalsPathologicalEventMatcher{
 		delegate: &SimplePathologicalEventMatcher{
 			name:               "TopologyAwareHintsDisabledDuringTaintManagerTests",
-			messageReasonRegex: regexp.MustCompile(`^TopologyAwareHintsDisabled$`),
+			messageReasonRegex: messageReasonRegex,
 		},
 		allowIfWithinIntervals: adjustedTaintTestIntervals,
 	}
