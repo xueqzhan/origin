@@ -187,28 +187,42 @@ func generateJUnitTestCasesE2ENamespaces(testName string, nsResults map[string]*
 // is easier to author, but less complete in its view.
 // I hate regexes, so I only do this because I really have to.
 func (d *duplicateEventsEvaluator) testDuplicatedEvents(testName string, flakeOnly bool, events monitorapi.Intervals, kubeClientConfig *rest.Config, isE2E bool) []*junitapi.JUnitTestCase {
-
+	// eventCounters keeps track of counters needed for calculating allowed thresholds. The idea is to remove any delta
+	// accumulated for allowed event instances. For each event, we keep track of count from the previous instance and the
+	// accumulated delta (previousAllowed) from previously allowed instances of the same event. previousAllowed will be
+	// added to the default threshold to calculate pathological event failures.
+	type eventCounters struct {
+		previousCount int
+		previousAllowed int
+	}
+	eventToCounters := map[string]eventCounters{}
 	// displayToCount maps a static display message to the matching repeating interval we saw with the highest count
 	displayToCount := map[string]monitorapi.Interval{}
 
 	for _, event := range events {
+		// key used in a map to identify the common interval that is repeating and we may
+		// encounter multiple times.
+		eventDisplayMessage := fmt.Sprintf("%s - reason/%s %s", event.Locator,
+			event.StructuredMessage.Reason, event.StructuredMessage.HumanMessage)
+		counters, ok := eventToCounters[eventDisplayMessage]
+		if !ok {
+			counters = eventCounters{}
+		}
 
 		times := GetTimesAnEventHappened(event.StructuredMessage)
-		if times > DuplicateEventThreshold {
-
-			// Check if we have an allowance for this event. This code used to just check if it had an interesting flag,
-			// implying it matches some pattern, but that happens even for upgrade patterns occurring in non-upgrade jobs,
-			// so we were ignoring patterns that were meant to be allowed only in upgrade jobs in all jobs. The list of
-			// allowed patterns passed to this object wasn't even used.
-			if allowed, _ := d.registry.AllowedByAny(event, d.topology); allowed {
-				continue
+		// Check if we have an allowance for this event. This code used to just check if it had an interesting flag,
+		// implying it matches some pattern, but that happens even for upgrade patterns occurring in non-upgrade jobs,
+		// so we were ignoring patterns that were meant to be allowed only in upgrade jobs in all jobs. The list of
+		// allowed patterns passed to this object wasn't even used.
+		if allowed, _ := d.registry.AllowedByAny(event, d.topology); allowed {
+			// Update the counters for future calculation
+			eventToCounters[eventDisplayMessage] = eventCounters{
+				previousCount: times,
+				previousAllowed: counters.previousAllowed + times - counters.previousCount,
 			}
-
-			// key used in a map to identify the common interval that is repeating and we may
-			// encounter multiple times.
-			eventDisplayMessage := fmt.Sprintf("%s - reason/%s %s", event.Locator,
-				event.StructuredMessage.Reason, event.StructuredMessage.HumanMessage)
-
+			continue
+		}
+		if times > DuplicateEventThreshold + counters.previousAllowed {
 			if _, ok := displayToCount[eventDisplayMessage]; !ok {
 				displayToCount[eventDisplayMessage] = event
 			}
@@ -216,6 +230,10 @@ func (d *duplicateEventsEvaluator) testDuplicatedEvents(testName string, flakeOn
 				// Update to the latest interval we saw with the higher count, so from/to are more accurate
 				displayToCount[eventDisplayMessage] = event
 			}
+		}
+		eventToCounters[eventDisplayMessage] = eventCounters{
+			previousCount: times,
+			previousAllowed: counters.previousAllowed,
 		}
 	}
 
