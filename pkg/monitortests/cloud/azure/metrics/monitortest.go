@@ -157,7 +157,15 @@ func fetchLBMetrics(ctx context.Context, client *armmonitor.MetricsClient, subsc
 	// metricsMap maps a metric name to test parameters. It includes query parameter such as metric intervals.
 	// It also includes thresholds that will be compared with the time series instances.
 	metricsMap := map[string]metricTest{
+		"VipAvailability": {
+			interval:     "PT1M",
+			avgThreshold: lbDipAvailabilityThreshold,
+		},
 		"DipAvailability": {
+			interval:     "PT1M",
+			avgThreshold: lbDipAvailabilityThreshold,
+		},
+		"GlobalBackendAvailability": {
 			interval:     "PT1M",
 			avgThreshold: lbDipAvailabilityThreshold,
 		},
