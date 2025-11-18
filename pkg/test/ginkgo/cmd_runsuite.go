@@ -158,6 +158,17 @@ func (o *GinkgoRunSuiteOptions) SetIOStreams(streams genericclioptions.IOStreams
 	o.IOStreams = streams
 }
 
+// detectDuplicateTests panics if any test names appear more than once
+func detectDuplicateTests(specs extensions.ExtensionTestSpecs) {
+	seen := make(map[string]bool)
+	for _, spec := range specs {
+		if seen[spec.Name] {
+			panic(fmt.Sprintf("duplicate test detected: %q", spec.Name))
+		}
+		seen[spec.Name] = true
+	}
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -242,6 +253,8 @@ func (o *GinkgoRunSuiteOptions) Run(suite *TestSuite, clusterConfig *clusterdisc
 	if len(specs) == 0 {
 		return fmt.Errorf("no tests to run")
 	}
+
+	detectDuplicateTests(specs)
 
 	k8sTestNames := map[string]bool{}
 	for _, t := range specs {
