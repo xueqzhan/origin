@@ -10,13 +10,13 @@ import (
 
 func Test_detectDuplicateTests(t *testing.T) {
 	tests := []struct {
-		name                 string
-		specs                extensions.ExtensionTestSpecs
-		wantTestCaseCount    int
-		wantSuccess          bool
-		wantFailure          bool
-		wantDuplicateCount   int
-		wantFailureContains  []string
+		name                string
+		specs               extensions.ExtensionTestSpecs
+		wantTestCaseCount   int
+		wantSuccess         bool
+		wantFailure         bool
+		wantDuplicateCount  int
+		wantFailureContains []string
 	}{
 		{
 			name: "no duplicates",
@@ -193,4 +193,3 @@ func Test_detectDuplicateTests(t *testing.T) {
 		})
 	}
 }
-
