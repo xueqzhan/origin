@@ -212,7 +212,8 @@ type Stats struct {
 	totalLatencies   []int64 // Total request times
 
 	// Ping statistics per target
-	pingStats map[string]*PingStats
+	pingStats        map[string]*PingStats
+	pingTargetsOrder []string // Ordered list of ping targets (from traceroute)
 }
 
 func newStats() *Stats {
@@ -324,6 +325,7 @@ func main() {
 	}
 
 	stats := newStats()
+	stats.pingTargetsOrder = config.PingTargets // Preserve traceroute order for display
 
 	// Start the reporter goroutine (only for text mode)
 	if config.OutputFormat == "text" {
@@ -872,6 +874,7 @@ func discoverPingTargets(ctx context.Context, targetURL string, outputFormat str
 
 	// Test nodes in parallel for faster discovery
 	type testResult struct {
+		index   int
 		node    string
 		success bool
 	}
@@ -879,10 +882,10 @@ func discoverPingTargets(ctx context.Context, targetURL string, outputFormat str
 
 	for i := 0; i < testCount; i++ {
 		node := intermediateNodes[i]
-		go func(n string) {
+		go func(idx int, n string) {
 			result := runPing(ctx, n)
-			resultsChan <- testResult{node: n, success: result.Success}
-		}(node)
+			resultsChan <- testResult{index: idx, node: n, success: result.Success}
+		}(i, node)
 	}
 
 	// Blocklist of unreliable nodes to exclude
@@ -890,9 +893,16 @@ func discoverPingTargets(ctx context.Context, targetURL string, outputFormat str
 		"242.10.91.181": true, // Consistently unreliable node on worker2
 	}
 
-	// Collect results
+	// Collect results in a map to preserve order
+	results := make(map[int]testResult)
 	for i := 0; i < testCount; i++ {
 		result := <-resultsChan
+		results[result.index] = result
+	}
+
+	// Add pingable nodes in traceroute order
+	for i := 0; i < testCount; i++ {
+		result := results[i]
 		if result.success && !blocklist[result.node] {
 			pingableNodes = append(pingableNodes, result.node)
 		}
@@ -1173,14 +1183,22 @@ func printStats(stats *Stats, label string, sampleInterval time.Duration) {
 		fmt.Println()
 		fmt.Println("PING STATISTICS:")
 
-		// Sort targets for consistent output
-		targets := make([]string, 0, len(stats.pingStats))
-		for target := range stats.pingStats {
-			targets = append(targets, target)
+		// Use traceroute order if available, otherwise fall back to sorted order
+		targets := stats.pingTargetsOrder
+		if len(targets) == 0 {
+			// Fallback: sort targets alphabetically
+			targets = make([]string, 0, len(stats.pingStats))
+			for target := range stats.pingStats {
+				targets = append(targets, target)
+			}
+			sort.Strings(targets)
 		}
-		sort.Strings(targets)
 
 		for _, target := range targets {
+			// Skip targets that have no stats (shouldn't happen, but be safe)
+			if stats.pingStats[target] == nil {
+				continue
+			}
 			pstat := stats.pingStats[target]
 			pingDisruptionRate := float64(0)
 			if pstat.totalPings > 0 {
